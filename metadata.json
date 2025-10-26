@@ -1,0 +1,7 @@
+{
+  "name": "Priority One: AI",
+  "description": "A real time, voice controlled 911 operator simulator where you handle emergencies by communicating with dynamic AI callers and are judged by a hyper-critical AI supervisor.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
