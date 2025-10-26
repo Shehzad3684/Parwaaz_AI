@@ -37,6 +37,15 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: 
     return buffer;
 }
 
+const ControlButton: React.FC<{ onClick: () => void; isActive: boolean; children: React.ReactNode, className?: string }> = ({ onClick, isActive, children, className = '' }) => (
+    <button
+        onClick={onClick}
+        className={`px-2 py-0.5 text-xs rounded border transition-colors ${isActive ? 'bg-cad-primary text-cad-bg border-cad-primary' : 'bg-transparent text-cad-text-dim border-cad-border hover:border-cad-primary'} ${className}`}
+    >
+        {children}
+    </button>
+);
+
 const CadInterface: React.FC<{ scenario: Scenario; onEndCall: (transcript: TranscriptionEntry[], callData: CallData) => void }> = ({ scenario, onEndCall }) => {
     const [callData, setCallData] = useState<CallData>({ address: '', description: '', notes: '', dispatchedUnits: [] });
     const [transcript, setTranscript] = useState<TranscriptionEntry[]>([]);
@@ -46,6 +55,8 @@ const CadInterface: React.FC<{ scenario: Scenario; onEndCall: (transcript: Trans
     const [isCallerSpeaking, setIsCallerSpeaking] = useState(false);
     const [callerLocation, setCallerLocation] = useState<Location | null>(null);
     const [mapUnits, setMapUnits] = useState<MapUnit[]>([]);
+    const [textSize, setTextSize] = useState<'sm' | 'base' | 'lg'>('sm');
+    const [highlight, setHighlight] = useState<'none' | 'user' | 'caller'>('none');
 
     const inputAudioContextRef = useRef<AudioContext | null>(null);
     const outputAudioContextRef = useRef<AudioContext | null>(null);
@@ -54,6 +65,7 @@ const CadInterface: React.FC<{ scenario: Scenario; onEndCall: (transcript: Trans
     const nextStartTimeRef = useRef<number>(0);
     const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
     const transcriptEndRef = useRef<HTMLDivElement>(null);
+    const callStartTimeRef = useRef<number | null>(null);
 
     // Generate a consistent random location for the duration of the call
     const callLocationRef = useRef<Location | null>(null);
@@ -150,6 +162,7 @@ const CadInterface: React.FC<{ scenario: Scenario; onEndCall: (transcript: Trans
         }
 
         setCallStatus('ACTIVE');
+        callStartTimeRef.current = Date.now();
         setIsMicActive(true);
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -199,7 +212,7 @@ const CadInterface: React.FC<{ scenario: Scenario; onEndCall: (transcript: Trans
                                     const newLast = {...last, text: last.text + text};
                                     return [...prev.slice(0, -1), newLast];
                                 }
-                                return [...prev, { speaker: 'user', text }];
+                                return [...prev, { speaker: 'user', text, timestamp: Date.now() }];
                             });
                         }
                         if (message.serverContent?.outputTranscription) {
@@ -210,7 +223,7 @@ const CadInterface: React.FC<{ scenario: Scenario; onEndCall: (transcript: Trans
                                     const newLast = {...last, text: last.text + text};
                                     return [...prev.slice(0, -1), newLast];
                                 }
-                                return [...prev, { speaker: 'caller', text }];
+                                return [...prev, { speaker: 'caller', text, timestamp: Date.now() }];
                             });
                         }
 
@@ -279,13 +292,38 @@ const CadInterface: React.FC<{ scenario: Scenario; onEndCall: (transcript: Trans
     return (
         <div className="w-full h-full grid grid-cols-5 grid-rows-6 gap-2 p-2 bg-black">
             <div className="col-span-3 row-span-4 bg-cad-bg border border-cad-border p-2 flex flex-col">
-                <h2 className="text-cad-primary font-bold border-b border-cad-border pb-1 mb-2">LIVE TRANSCRIPT</h2>
-                <div className="flex-grow overflow-y-auto pr-2 text-sm">
-                   {transcript.map((t, i) => (
-                       <p key={i} className={t.speaker === 'user' ? 'text-cad-warn' : 'text-cad-text'}>
-                           <span className="font-bold">{t.speaker.toUpperCase()}: </span>{t.text}
-                       </p>
-                   ))}
+                <div className="flex items-center justify-between border-b border-cad-border pb-1 mb-2">
+                    <h2 className="text-cad-primary font-bold">LIVE TRANSCRIPT</h2>
+                    <div className="flex items-center space-x-1">
+                        <ControlButton onClick={() => setHighlight('none')} isActive={highlight === 'none'}>All</ControlButton>
+                        <ControlButton onClick={() => setHighlight('user')} isActive={highlight === 'user'}>Operator</ControlButton>
+                        <ControlButton onClick={() => setHighlight('caller')} isActive={highlight === 'caller'}>Caller</ControlButton>
+                        <div className="w-px h-4 bg-cad-border mx-2"></div>
+                        <ControlButton onClick={() => setTextSize('sm')} isActive={textSize === 'sm'}><span className="text-xs font-bold">A</span></ControlButton>
+                        <ControlButton onClick={() => setTextSize('base')} isActive={textSize === 'base'}><span className="text-sm font-bold">A</span></ControlButton>
+                        <ControlButton onClick={() => setTextSize('lg')} isActive={textSize === 'lg'}><span className="text-base font-bold">A</span></ControlButton>
+                    </div>
+                </div>
+                <div className="flex-grow overflow-y-auto pr-2">
+                   {transcript.map((t, i) => {
+                       const isHighlighted = highlight === t.speaker;
+                       const isDimmed = highlight !== 'none' && highlight !== t.speaker;
+
+                       const elapsedTime = callStartTimeRef.current ? Math.max(0, Math.floor((t.timestamp - callStartTimeRef.current) / 1000)) : 0;
+                       const minutes = String(Math.floor(elapsedTime / 60)).padStart(2, '0');
+                       const seconds = String(elapsedTime % 60).padStart(2, '0');
+                       
+                       const textSizeClass = { sm: 'text-sm', base: 'text-base', lg: 'text-lg' }[textSize];
+
+                       return (
+                          <p key={i} className={`${textSizeClass} ${isDimmed ? 'opacity-40' : 'opacity-100'} transition-opacity duration-300 mb-1 leading-relaxed`}>
+                              <span className="text-cad-text-dim mr-2 font-mono">[{minutes}:{seconds}]</span>
+                              <span className={`${t.speaker === 'user' ? 'text-cad-warn' : 'text-cad-text'} ${isHighlighted ? 'bg-cad-primary/20 px-1 rounded' : ''}`}>
+                                  <span className="font-bold">{t.speaker.toUpperCase()}: </span>{t.text}
+                              </span>
+                          </p>
+                       )
+                   })}
                    <div ref={transcriptEndRef} />
                 </div>
                  <div className="border-t border-cad-border pt-2 flex items-center justify-between">

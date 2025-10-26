@@ -50,6 +50,7 @@ export interface DebriefData {
 export interface TranscriptionEntry {
   speaker: 'user' | 'caller';
   text: string;
+  timestamp: number;
 }
 
 export interface MapUnit {
